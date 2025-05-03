@@ -1,0 +1,4 @@
+python-vlc
+psutil
+windows-curses; platform_system == "Windows"
+rich
