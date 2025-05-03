@@ -512,19 +512,28 @@ class MP3Player:
                         time.sleep(0.2)  # Pausa más larga para asegurar que se detiene
                     
                     # Verificar si el archivo existe y es accesible
-                    if not os.path.exists(self.songs[self.current_song_index]):
-                        error_msg = f"El archivo no existe: {self.songs[self.current_song_index]}"
+                    song_path = self.songs[self.current_song_index]
+                    if not os.path.exists(song_path):
+                        error_msg = f"El archivo no existe: {song_path}"
                         self.show_error("❌ El archivo no existe", log_error=True)
                         logging.error(error_msg)
                         return
                     
-                    if not os.access(self.songs[self.current_song_index], os.R_OK):
-                        error_msg = f"Sin permisos para leer el archivo: {self.songs[self.current_song_index]}"
+                    if not os.access(song_path, os.R_OK):
+                        error_msg = f"Sin permisos para leer el archivo: {song_path}"
                         self.show_error("❌ Sin permisos para leer el archivo", log_error=True)
                         logging.error(error_msg)
                         return
                     
-                    media = self.instance.media_new(self.songs[self.current_song_index])
+                    # Verificar que el archivo no esté vacío
+                    if os.path.getsize(song_path) == 0:
+                        error_msg = f"El archivo está vacío: {song_path}"
+                        self.show_error("❌ El archivo está vacío", log_error=True)
+                        logging.error(error_msg)
+                        return
+                    
+                    # Crear el objeto media con la ruta absoluta
+                    media = self.instance.media_new(os.path.abspath(song_path))
                     self.player.set_media(media)
                     
                     # Configurar opciones de decodificación
@@ -533,9 +542,10 @@ class MP3Player:
                     media.add_option('--no-audio-resample')
                     media.add_option('--file-caching=1000')  # Aumentar el caché
                     media.add_option('--network-caching=1000')  # Aumentar el caché de red
+                    media.add_option('--aout=alsa')  # Forzar el uso de ALSA en Linux
                     
                     self.player.play()
-                    logging.debug(f"Iniciando reproducción de: {self.songs[self.current_song_index]}")
+                    logging.debug(f"Iniciando reproducción de: {song_path}")
                     
                     # Esperar un momento para que VLC inicie la reproducción
                     time.sleep(0.5)
@@ -545,17 +555,17 @@ class MP3Player:
                         # Intentar una segunda vez con más tiempo de espera
                         time.sleep(0.5)
                         if not self.player.is_playing():
-                            error_msg = f"Error al reproducir el archivo: {self.songs[self.current_song_index]}"
+                            error_msg = f"Error al reproducir el archivo: {song_path}"
                             self.show_error("❌ Error al reproducir el archivo", log_error=True)
                             logging.error(error_msg)
                             return
                     
                     self.is_playing = True
-                    self.current_song = self.songs[self.current_song_index]
+                    self.current_song = song_path
                     self.clear_error()
                     logging.info(f"Reproducción iniciada correctamente: {self.current_song}")
                 except Exception as e:
-                    error_msg = f"Error al reproducir {self.songs[self.current_song_index]}: {str(e)}"
+                    error_msg = f"Error al reproducir {song_path}: {str(e)}"
                     self.show_error(f"❌ Error: {str(e)}", log_error=True)
                     logging.error(error_msg)
             else:
@@ -688,55 +698,166 @@ def find_music_directories():
     """Buscar directorios que contengan archivos de música, ignorando los ocultos (con .)"""
     music_dirs = set()  # Usar set para evitar duplicados
     supported_extensions = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac']
-    
+
     def is_visible_path(path):
-        # Devuelve True si ningún componente de la ruta empieza por '.'
-        return all(not part.startswith('.') for part in Path(path).parts)
-    
-    if platform.system().lower() == 'windows':
-        # En Windows, usar dir /s /b para buscar archivos de música
-        for drive in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-            if os.path.exists(f"{drive}:"):
-                for ext in supported_extensions:
-                    try:
-                        result = subprocess.run(['cmd', '/c', f'dir /s /b /a:-d "{drive}:\\*.{ext}"'], 
-                                             capture_output=True, text=True)
-                        for file_path in result.stdout.splitlines():
-                            if os.path.exists(file_path):
-                                dir_path = os.path.dirname(file_path)
-                                if is_visible_path(dir_path):
-                                    music_dirs.add(dir_path)
-                    except:
-                        pass
-    else:
-        # En Linux/macOS, usar find para buscar archivos de música
+        """Devuelve True si ningún componente de la ruta empieza por '.'"""
         try:
-            find_cmd = ['find', os.path.expanduser('~'), '-type', 'f', '(']
+            return all(not part.startswith('.') for part in Path(path).parts)
+        except Exception as e:
+            logging.error(f"Error al verificar visibilidad de ruta {path}: {str(e)}")
+            return False
+
+    def find_files_in_directory(base_dir):
+        """Busca archivos de música en un directorio base"""
+        try:
+            # Construir el comando find
+            find_cmd = ['find', base_dir, '-type', 'f', '(']
             for i, ext in enumerate(supported_extensions):
                 if i > 0:
                     find_cmd.extend(['-o'])
                 find_cmd.extend(['-iname', f'*.{ext}'])
             find_cmd.extend([')'])
-            result = subprocess.run(find_cmd, capture_output=True, text=True)
-            for file_path in result.stdout.splitlines():
-                if os.path.exists(file_path):
-                    dir_path = os.path.dirname(file_path)
-                    if is_visible_path(dir_path):
-                        music_dirs.add(dir_path)
+            
+            # Ejecutar el comando con logging detallado
+            logging.info(f"Ejecutando comando find en {base_dir}: {' '.join(find_cmd)}")
+            
+            # Ejecutar find ignorando errores de permisos
+            result = subprocess.run(find_cmd, capture_output=True, text=True, check=False)
+            
+            # Si hay salida, procesarla aunque el código de retorno no sea 0
+            if result.stdout:
+                logging.info(f"Encontrados {len(result.stdout.splitlines())} archivos en {base_dir}")
+                logging.debug(f"Primeros 5 archivos encontrados: {result.stdout.splitlines()[:5]}")
+                return result
+            
+            # Si no hay salida pero hay error, verificar si es por permisos
+            if result.stderr:
+                # Filtrar solo los errores que no sean de permisos
+                non_permission_errors = [line for line in result.stderr.splitlines() 
+                                       if 'Permiso denegado' not in line and 'Permission denied' not in line]
+                if non_permission_errors:
+                    logging.warning(f"Errores no relacionados con permisos en {base_dir}: {non_permission_errors}")
+                else:
+                    logging.info(f"Se ignoraron errores de permisos en {base_dir}")
+            
+            return result
         except Exception as e:
-            logging.error(f"Error al buscar archivos de música: {str(e)}")
-    
+            logging.error(f"Error inesperado al ejecutar find en {base_dir}: {str(e)}")
+            return None
+
+    def process_find_results(result, base_dir):
+        """Procesa los resultados del comando find"""
+        if not result:
+            return
+        
+        # Procesar cada línea de la salida
+        for file_path in result.stdout.splitlines():
+            try:
+                # Normalizar la ruta y verificar que existe
+                file_path = os.path.normpath(file_path)
+                if not os.path.exists(file_path):
+                    logging.warning(f"Ruta no encontrada: {file_path}")
+                    continue
+                
+                # Obtener el directorio padre
+                dir_path = os.path.dirname(file_path)
+                
+                # Verificar que el directorio no esté oculto
+                if is_visible_path(dir_path):
+                    # Añadir el directorio al conjunto
+                    music_dirs.add(dir_path)
+                    logging.debug(f"Directorio añadido: {dir_path}")
+                else:
+                    logging.debug(f"Directorio oculto ignorado: {dir_path}")
+            except Exception as e:
+                logging.error(f"Error al procesar ruta {file_path}: {str(e)}")
+        
+        # Mostrar resumen de directorios encontrados
+        if music_dirs:
+            logging.info(f"Se encontraron {len(music_dirs)} directorios únicos en {base_dir}")
+            logging.debug(f"Directorios encontrados: {sorted(list(music_dirs))}")
+
+    if platform.system().lower() == 'windows':
+        # En Windows, usa dir /s /b para buscar archivos de música
+        for drive in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            if os.path.exists(f"{drive}:"):
+                for ext in supported_extensions:
+                    try:
+                        cmd = f'dir /s /b /a:-d "{drive}:\\*.{ext}"'
+                        logging.info(f"Ejecutando comando en Windows: {cmd}")
+                        result = subprocess.run(['cmd', '/c', cmd], 
+                                             capture_output=True, text=True, check=True)
+                        for file_path in result.stdout.splitlines():
+                            try:
+                                dir_path = os.path.dirname(file_path)
+                                if is_visible_path(dir_path):
+                                    music_dirs.add(dir_path)
+                            except Exception as e:
+                                logging.error(f"Error al procesar ruta Windows {file_path}: {str(e)}")
+                    except subprocess.CalledProcessError as e:
+                        logging.error(f"Error al ejecutar dir en {drive}: {e}")
+    else:
+        # En Linux/macOS/Termux, usa find para buscar archivos de música
+        try:
+            # Detectar si es Termux
+            is_termux = 'com.termux' in os.environ.get('PREFIX', '') or os.path.exists('/data/data/com.termux/files/home')
+            if is_termux:
+                # En Termux, buscar en la carpeta Downloads
+                downloads_paths = [
+                    '/storage/emulated/0/Download',
+                    '/storage/emulated/0/Downloads',
+                    '/sdcard/Download',
+                    '/sdcard/Downloads'
+                ]
+                base_dirs = []
+                for path in downloads_paths:
+                    if os.path.exists(path):
+                        base_dirs.append(path)
+                        logging.info(f"Encontrada carpeta Downloads en Termux: {path}")
+                
+                if not base_dirs:
+                    logging.warning("No se encontró la carpeta Downloads en Termux")
+            else:
+                # En Linux/macOS, verificar si tenemos permisos de root
+                try:
+                    # Intentar acceder a un archivo en /root para verificar permisos
+                    os.listdir('/root')
+                    # Si llegamos aquí, tenemos permisos de root
+                    base_dirs = ['/']
+                    logging.info("Permisos de root detectados, buscando desde la raíz")
+                except PermissionError:
+                    # No tenemos permisos de root, buscar desde el home
+                    home_dir = os.path.expanduser('~')
+                    base_dirs = [home_dir]
+                    logging.info(f"No hay permisos de root, buscando desde el home: {home_dir}")
+            
+            # Procesar cada directorio base
+            for base_dir in base_dirs:
+                result = find_files_in_directory(base_dir)
+                process_find_results(result, base_dir)
+                
+        except Exception as e:
+            logging.error(f"Error inesperado al buscar archivos de música: {str(e)}")
+
     # Convertir el set a lista y ordenar
     music_dirs = sorted(list(music_dirs))
-    
+    logging.info(f"Total de directorios encontrados: {len(music_dirs)}")
+    if music_dirs:
+        logging.debug(f"Primeros 5 directorios: {music_dirs[:5]}")
+
     # Verificar que los directorios aún contengan archivos de música
     valid_dirs = []
     for dir_path in music_dirs:
-        if os.path.exists(dir_path) and os.path.isdir(dir_path):
-            for ext in supported_extensions:
-                if list(Path(dir_path).glob(f'*.{ext}')):
-                    valid_dirs.append(dir_path)
-                    break
+        try:
+            if os.path.exists(dir_path) and os.path.isdir(dir_path):
+                for ext in supported_extensions:
+                    if list(Path(dir_path).glob(f'*.{ext}')):
+                        valid_dirs.append(dir_path)
+                        break
+        except Exception as e:
+            logging.error(f"Error al verificar directorio {dir_path}: {str(e)}")
+
+    logging.info(f"Total de directorios válidos: {len(valid_dirs)}")
     return valid_dirs
 
 def main(stdscr):
