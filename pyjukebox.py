@@ -117,7 +117,7 @@ class VLCInstaller:
 
 class MP3Player:
     def __init__(self, stdscr):
-        logging.info("Inicializando reproductor MP3")
+        logging.info("Inicializando PyJukebox")
         self.stdscr = stdscr
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
@@ -142,7 +142,7 @@ class MP3Player:
         self.error_message = None
         self.error_timer = 0
         self.key_pressed = False
-        logging.info("Reproductor MP3 inicializado correctamente")
+        logging.info("PyJukebox inicializado correctamente")
 
     def init_colors(self):
         """Inicializar los pares de colores"""
@@ -281,7 +281,7 @@ class MP3Player:
         height, width = self.stdscr.getmaxyx()
         
         # Título
-        title = "🎵 Reproductor MP3 🎵"
+        title = "🎵 PyJukebox 🎵"
         self.stdscr.addstr(0, (width - len(title)) // 2, title, 
                           curses.color_pair(COLOR_PAIRS['TITLE']) | curses.A_BOLD)
         
