@@ -134,7 +134,6 @@ class MP3Player:
         self.console = Console()
         self.current_path = None
         self.parent_path = None
-        self.load_preferences()
         self.selected_index = 0
         self.max_items_per_page = 10
         self.current_page = 0
@@ -142,6 +141,10 @@ class MP3Player:
         self.error_message = None
         self.error_timer = 0
         self.key_pressed = False
+        
+        # Load preferences after all attributes are initialized
+        self.load_preferences()
+        
         logging.info("Reproductor MP3 inicializado correctamente")
 
     def init_colors(self):
@@ -652,7 +655,7 @@ def main(stdscr):
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)  # Habilitar eventos del ratón
     
     # Verificar si VLC está instalado
-    if not VLCInstaller.check_vlc_installed():
+    if not VLCInstaller.check_vlc():
         logging.warning("VLC no encontrado, intentando instalación automática")
         stdscr.clear()
         stdscr.addstr(0, 0, "VLC no encontrado. Intentando instalar...", 
@@ -682,13 +685,20 @@ def main(stdscr):
     curses.noecho()
     logging.info(f"Directorio de música ingresado: {music_dir}")
     
-    if not music_dir and player.last_directory and os.path.exists(player.last_directory):
-        music_dir = player.last_directory
-        logging.info(f"Usando último directorio conocido: {music_dir}")
-    elif not music_dir:
-        # If no directory is provided and no valid last_directory exists, use home directory
-        music_dir = os.path.expanduser("~")
-        logging.info(f"Usando directorio home como predeterminado: {music_dir}")
+    # Handle Docker environment
+    if not music_dir:
+        # Try to use last_directory if it exists and is valid
+        if hasattr(player, 'last_directory') and player.last_directory and os.path.exists(player.last_directory):
+            music_dir = player.last_directory
+            logging.info(f"Usando último directorio conocido: {music_dir}")
+        else:
+            # In Docker, try to use /music directory first, then fallback to home
+            if os.path.exists('/music'):
+                music_dir = '/music'
+                logging.info("Usando directorio /music en Docker")
+            else:
+                music_dir = os.path.expanduser("~")
+                logging.info(f"Usando directorio home como predeterminado: {music_dir}")
     
     if not player.load_directory(music_dir):
         stdscr.clear()
