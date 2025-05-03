@@ -123,6 +123,7 @@ class MP3Player:
         self.player = self.instance.media_player_new()
         self.current_song = None
         self.is_playing = False
+        self.last_directory = None
         self.songs = []
         self.folders = []
         self.current_song_index = 0
