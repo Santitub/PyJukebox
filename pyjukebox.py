@@ -142,6 +142,8 @@ class MP3Player:
         self.error_message = None
         self.error_timer = 0
         self.key_pressed = False
+        self.found_music_dirs = getattr(self, 'found_music_dirs', [])  # Asegura que existe
+        self.load_found_directories()  # SIEMPRE poblar folders desde found_music_dirs
         logging.info("PyJukebox inicializado correctamente")
 
     def init_colors(self):
@@ -195,6 +197,7 @@ class MP3Player:
                     self.volume = prefs.get('volume', 50)
                     self.repeat_mode = prefs.get('repeat_mode', 0)
                     self.last_directory = prefs.get('last_directory')
+                    self.found_music_dirs = prefs.get('found_music_dirs', [])
                     self.player.audio_set_volume(self.volume)
                 logging.info("Preferencias cargadas correctamente")
             else:
@@ -212,7 +215,8 @@ class MP3Player:
             prefs = {
                 'volume': self.volume,
                 'repeat_mode': self.repeat_mode,
-                'last_directory': self.last_directory
+                'last_directory': self.last_directory,
+                'found_music_dirs': self.found_music_dirs
             }
             with open(config_path, 'w') as f:
                 json.dump(prefs, f)
@@ -275,6 +279,24 @@ class MP3Player:
         self.error_message = None
         self.error_timer = 0
 
+    def load_found_directories(self):
+        """Cargar los directorios encontrados en la lista principal"""
+        self.folders = self.found_music_dirs
+        self.folders.sort()
+        logging.info(f"Se cargaron {len(self.folders)} directorios con música")
+
+    def search_more_directories(self):
+        """Buscar más directorios con música y añadirlos a la lista"""
+        new_dirs = find_music_directories()
+        # Añadir solo los directorios que no estén ya en la lista
+        for dir_path in new_dirs:
+            if dir_path not in self.found_music_dirs:
+                self.found_music_dirs.append(dir_path)
+        self.found_music_dirs.sort()
+        self.load_found_directories()
+        self.save_preferences()  # Guardar la lista actualizada
+        return len(new_dirs) - len(self.found_music_dirs)  # Retornar cuántos nuevos se encontraron
+
     def draw_interface(self):
         """Dibujar la interfaz completa"""
         self.stdscr.clear()
@@ -291,6 +313,9 @@ class MP3Player:
             if len(path_display) > width - 2:
                 path_display = path_display[:width-5] + "..."
             self.stdscr.addstr(2, 0, path_display, curses.color_pair(COLOR_PAIRS['STATUS']))
+        else:
+            self.stdscr.addstr(2, 0, "📁 Directorios con música encontrados:",
+                             curses.color_pair(COLOR_PAIRS['STATUS']))
         
         # Estado actual
         status = "▶️ Reproduciendo" if self.is_playing else "⏸️ Pausado" if self.current_song else "⏹️ Detenido"
@@ -315,8 +340,12 @@ class MP3Player:
         
         # Lista de carpetas y canciones
         list_y = 7 if self.error_message else 6
-        self.stdscr.addstr(list_y, 0, "📁 Carpetas y canciones:", 
-                          curses.color_pair(COLOR_PAIRS['TITLE']))
+        if not self.current_path:
+            self.stdscr.addstr(list_y, 0, "Selecciona un directorio para ver sus canciones (F: Buscar más)", 
+                             curses.color_pair(COLOR_PAIRS['TITLE']))
+        else:
+            self.stdscr.addstr(list_y, 0, "📁 Carpetas y canciones:", 
+                             curses.color_pair(COLOR_PAIRS['TITLE']))
         
         # Calcular índices para la paginación
         total_items = len(self.folders) + len(self.songs)
@@ -331,7 +360,11 @@ class MP3Player:
             if i < len(self.folders):
                 # Es una carpeta
                 folder_name = os.path.basename(self.folders[i])
-                display_name = f"📁 {folder_name}"
+                if not self.current_path:
+                    # Mostrar la ruta completa si estamos en la vista principal
+                    display_name = f"📁 {self.folders[i]}"
+                else:
+                    display_name = f"📁 {folder_name}"
             else:
                 # Es una canción
                 song_idx = i - len(self.folders)
@@ -366,7 +399,7 @@ class MP3Player:
             "↑/↓: Navegar  ␣: Reproducir/Pausar  Enter: Abrir carpeta",
             "←/→: Avanzar/Retroceder  +/-: Volumen",
             "N: Siguiente  P: Anterior  S: Detener",
-            "R: Modo repetición  Q: Salir  B: Volver atrás"
+            "R: Modo repetición  Q: Salir  B: Volver atrás  F: Buscar más"
         ]
         for i, control in enumerate(controls):
             self.stdscr.addstr(height - len(controls) + i, 0, control,
@@ -424,10 +457,29 @@ class MP3Player:
                 self.selected_index = 0
                 self.current_page = 0
         elif key == ord('b'):  # Volver atrás
-            if self.parent_path:
+            # Si estamos en una carpeta principal, volver a la lista principal
+            if self.current_path and self.current_path in self.found_music_dirs:
+                self.current_path = None
+                self.parent_path = None
+                self.songs = []
+                self.load_found_directories()
+                self.selected_index = 0
+                self.current_page = 0
+            elif self.parent_path:
                 self.load_directory(self.parent_path)
                 self.selected_index = 0
                 self.current_page = 0
+        elif key == ord('f'):  # Buscar más directorios
+            if not self.current_path:  # Solo buscar más si estamos en la vista principal
+                self.stdscr.clear()
+                self.stdscr.addstr(0, 0, "🔍 Buscando más directorios con música...",
+                                 curses.color_pair(COLOR_PAIRS['STATUS']))
+                self.stdscr.refresh()
+                new_dirs = self.search_more_directories()
+                if new_dirs > 0:
+                    self.show_error(f"✅ Se encontraron {new_dirs} nuevos directorios", duration=3)
+                else:
+                    self.show_error("ℹ️ No se encontraron nuevos directorios", duration=3)
         elif key == ord('+'):
             self.set_volume(min(100, self.volume + 10))
         elif key == ord('-'):
@@ -632,6 +684,61 @@ def monitor_playback(player):
         
         time.sleep(0.1)
 
+def find_music_directories():
+    """Buscar directorios que contengan archivos de música, ignorando los ocultos (con .)"""
+    music_dirs = set()  # Usar set para evitar duplicados
+    supported_extensions = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac']
+    
+    def is_visible_path(path):
+        # Devuelve True si ningún componente de la ruta empieza por '.'
+        return all(not part.startswith('.') for part in Path(path).parts)
+    
+    if platform.system().lower() == 'windows':
+        # En Windows, usar dir /s /b para buscar archivos de música
+        for drive in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            if os.path.exists(f"{drive}:"):
+                for ext in supported_extensions:
+                    try:
+                        result = subprocess.run(['cmd', '/c', f'dir /s /b /a:-d "{drive}:\\*.{ext}"'], 
+                                             capture_output=True, text=True)
+                        for file_path in result.stdout.splitlines():
+                            if os.path.exists(file_path):
+                                dir_path = os.path.dirname(file_path)
+                                if is_visible_path(dir_path):
+                                    music_dirs.add(dir_path)
+                    except:
+                        pass
+    else:
+        # En Linux/macOS, usar find para buscar archivos de música
+        try:
+            find_cmd = ['find', os.path.expanduser('~'), '-type', 'f', '(']
+            for i, ext in enumerate(supported_extensions):
+                if i > 0:
+                    find_cmd.extend(['-o'])
+                find_cmd.extend(['-iname', f'*.{ext}'])
+            find_cmd.extend([')'])
+            result = subprocess.run(find_cmd, capture_output=True, text=True)
+            for file_path in result.stdout.splitlines():
+                if os.path.exists(file_path):
+                    dir_path = os.path.dirname(file_path)
+                    if is_visible_path(dir_path):
+                        music_dirs.add(dir_path)
+        except Exception as e:
+            logging.error(f"Error al buscar archivos de música: {str(e)}")
+    
+    # Convertir el set a lista y ordenar
+    music_dirs = sorted(list(music_dirs))
+    
+    # Verificar que los directorios aún contengan archivos de música
+    valid_dirs = []
+    for dir_path in music_dirs:
+        if os.path.exists(dir_path) and os.path.isdir(dir_path):
+            for ext in supported_extensions:
+                if list(Path(dir_path).glob(f'*.{ext}')):
+                    valid_dirs.append(dir_path)
+                    break
+    return valid_dirs
+
 def main(stdscr):
     logging.info("Iniciando aplicación")
     # Configurar curses
@@ -662,29 +769,33 @@ def main(stdscr):
 
     player = MP3Player(stdscr)
     
-    # Obtener el directorio inicial
-    stdscr.clear()
-    stdscr.addstr(0, 0, "📁 Ingresa la ruta a tu directorio de música: ",
-                 curses.color_pair(COLOR_PAIRS['TITLE']))
-    stdscr.refresh()
-    curses.echo()
-    music_dir = stdscr.getstr().decode('utf-8')
-    curses.noecho()
-    logging.info(f"Directorio de música ingresado: {music_dir}")
-    
-    if not music_dir and player.last_directory:
-        music_dir = player.last_directory
-        logging.info(f"Usando último directorio conocido: {music_dir}")
-    
-    if not player.load_directory(music_dir):
+    # Solo buscar directorios si NO existe el archivo de configuración
+    config_path = os.path.expanduser('~/.mp3player_config.json')
+    if not os.path.exists(config_path):
         stdscr.clear()
-        stdscr.addstr(0, 0, "❌ No se pudo cargar el directorio.",
-                     curses.color_pair(COLOR_PAIRS['ERROR']))
-        stdscr.addstr(1, 0, "Presiona cualquier tecla para salir...",
-                     curses.color_pair(COLOR_PAIRS['ERROR']))
+        stdscr.addstr(0, 0, "🔍 Buscando directorios con música...",
+                     curses.color_pair(COLOR_PAIRS['STATUS']))
         stdscr.refresh()
-        stdscr.getch()
-        return
+        
+        player.found_music_dirs = find_music_directories()
+        player.load_found_directories()
+        player.save_preferences()  # Guardar los directorios encontrados
+        
+        if not player.found_music_dirs:
+            # Si no se encontraron directorios
+            stdscr.clear()
+            stdscr.addstr(0, 0, "❌ No se encontraron directorios con música.",
+                         curses.color_pair(COLOR_PAIRS['ERROR']))
+            stdscr.addstr(1, 0, "Por favor, crea el directorio ~/Música o especifica una ruta válida.",
+                         curses.color_pair(COLOR_PAIRS['ERROR']))
+            stdscr.addstr(2, 0, "Presiona cualquier tecla para salir...",
+                         curses.color_pair(COLOR_PAIRS['ERROR']))
+            stdscr.refresh()
+            stdscr.getch()
+            return
+    else:
+        # Si existe el archivo, cargar la lista guardada (aunque esté vacía)
+        player.load_found_directories()
 
     # Iniciar el hilo de monitoreo de reproducción
     threading.Thread(target=monitor_playback, args=(player,), daemon=True).start()
