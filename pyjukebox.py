@@ -194,15 +194,25 @@ class MP3Player:
                     prefs = json.load(f)
                     self.volume = prefs.get('volume', 50)
                     self.repeat_mode = prefs.get('repeat_mode', 0)
-                    self.last_directory = prefs.get('last_directory')
+                    self.last_directory = prefs.get('last_directory', None)
                     self.player.audio_set_volume(self.volume)
                 logging.info("Preferencias cargadas correctamente")
             else:
+                # Initialize with default values
+                self.volume = 50
+                self.repeat_mode = 0
+                self.last_directory = None
+                self.player.audio_set_volume(self.volume)
                 logging.info("No se encontró archivo de preferencias, usando valores por defecto")
         except Exception as e:
             error_msg = f"Error al cargar preferencias: {str(e)}"
             logging.error(error_msg)
             self.show_error("❌ Error al cargar preferencias", log_error=True)
+            # Ensure default values are set even if there's an error
+            self.volume = 50
+            self.repeat_mode = 0
+            self.last_directory = None
+            self.player.audio_set_volume(self.volume)
 
     def save_preferences(self):
         """Guardar preferencias del usuario"""
@@ -672,9 +682,13 @@ def main(stdscr):
     curses.noecho()
     logging.info(f"Directorio de música ingresado: {music_dir}")
     
-    if not music_dir and player.last_directory:
+    if not music_dir and player.last_directory and os.path.exists(player.last_directory):
         music_dir = player.last_directory
         logging.info(f"Usando último directorio conocido: {music_dir}")
+    elif not music_dir:
+        # If no directory is provided and no valid last_directory exists, use home directory
+        music_dir = os.path.expanduser("~")
+        logging.info(f"Usando directorio home como predeterminado: {music_dir}")
     
     if not player.load_directory(music_dir):
         stdscr.clear()
