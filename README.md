@@ -27,6 +27,14 @@ Un reproductor de música en la terminal con interfaz de usuario intuitiva y sop
 - Biblioteca `python-vlc`
 - Biblioteca `rich` (para la interfaz de usuario)
 
+## Plataformas compatibles 🌍
+
+PyJukebox funciona en las siguientes plataformas:
+- **Windows**
+- **Linux**
+- **macOS**
+- **Android** (Termux)
+
 ## Instalación 🔧
 
 1. Instala VLC Media Player:
