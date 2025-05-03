@@ -46,7 +46,7 @@ Si prefieres usar Docker para ejecutar PyJukebox sin tener que instalar dependen
 Navega a la carpeta del proyecto y construye la imagen de Docker:
 
 ```bash
-docker build -t pyjukebox .
+docker pull santitub/pyjukebox
 ````
 
 #### 1.2 Ejecuta el contenedor Docker:
