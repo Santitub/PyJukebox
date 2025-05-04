@@ -11,13 +11,7 @@ import re
 import curses
 import curses.ascii
 import logging
-from datetime import datetime
 from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
-from rich.live import Live
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.text import Text
 
 # Configurar logging
 logging.basicConfig(
@@ -502,7 +496,7 @@ class MP3Player:
         if self.songs:
             if index is not None and 0 <= index < len(self.songs):
                 self.current_song_index = index
-                self.selected_index = index
+                self.selected_index = index + len(self.folders)  # Ajustar el índice para incluir las carpetas
                 logging.info(f"Seleccionada canción {index}: {self.songs[index]}")
             if not self.is_playing:
                 try:
@@ -532,17 +526,19 @@ class MP3Player:
                         logging.error(error_msg)
                         return
                     
-                    # Crear el objeto media con la ruta absoluta
-                    media = self.instance.media_new(os.path.abspath(song_path))
-                    self.player.set_media(media)
-                    
-                    # Configurar opciones de decodificación
-                    media.add_option('--no-audio-time-stretch')
-                    media.add_option('--no-video-time-stretch')
-                    media.add_option('--no-audio-resample')
-                    media.add_option('--file-caching=1000')  # Aumentar el caché
-                    media.add_option('--network-caching=1000')  # Aumentar el caché de red
-                    media.add_option('--aout=alsa')  # Forzar el uso de ALSA en Linux
+                    # Solo crear un nuevo objeto media si no hay uno existente
+                    if not self.player.get_media():
+                        # Crear el objeto media con la ruta absoluta
+                        media = self.instance.media_new(os.path.abspath(song_path))
+                        self.player.set_media(media)
+                        
+                        # Configurar opciones de decodificación
+                        media.add_option('--no-audio-time-stretch')
+                        media.add_option('--no-video-time-stretch')
+                        media.add_option('--no-audio-resample')
+                        media.add_option('--file-caching=1000')  # Aumentar el caché
+                        media.add_option('--network-caching=1000')  # Aumentar el caché de red
+                        media.add_option('--aout=alsa')  # Forzar el uso de ALSA en Linux
                     
                     self.player.play()
                     logging.debug(f"Iniciando reproducción de: {song_path}")
